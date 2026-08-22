@@ -55,7 +55,7 @@ const MMH_MATRIX = {
   ]
 };
 
-// --- MEDIAPIPE & VISION HTML LAYER ---
+// --- MEDIAPIPE VISION HTML ENGINE ---
 const cameraVisionHTML = `
 <!DOCTYPE html>
 <html>
@@ -115,16 +115,13 @@ const cameraVisionHTML = `
         return;
       }
 
-      // Draw 3D Pose Skeleton
       const landmarks = results.poseLandmarks;
       drawSkeleton(landmarks, ctx, canvas.width, canvas.height);
 
-      // Angle Calculations
       const trunkAngle = Math.round(getAngle(landmarks[11], landmarks[23], landmarks[25]));
       const neckAngle = Math.round(getAngle(landmarks[0], landmarks[11], landmarks[23]));
       const armAngle = Math.round(getAngle(landmarks[11], landmarks[13], landmarks[15]));
 
-      // Hand Object Detection
       let detectedObjectStr = "No Object Detected";
       if (cocoModel) {
         const predictions = await cocoModel.detect(video);
@@ -191,15 +188,19 @@ export default function App() {
   const [gender, setGender] = useState('Male');
   const [loadWeight, setLoadWeight] = useState(10);
 
+  // REBA Interactive State
   const [trunk, setTrunk] = useState(1);
   const [neck, setNeck] = useState(1);
-  const [legs] = useState(1);
+  const [legs, setLegs] = useState(1);
   const [upperArm, setUpperArm] = useState(1);
-  const [lowerArm] = useState(1);
-  const [wrist] = useState(1);
+  const [lowerArm, setLowerArm] = useState(1);
+  const [wrist, setWrist] = useState(1);
 
-  const [horizontalDist] = useState(30);
-  const [verticalDist] = useState(85);
+  // NIOSH Interactive State
+  const [horizontalDist, setHorizontalDist] = useState(30);
+  const [verticalDist, setVerticalDist] = useState(85);
+  const [travelDist, setTravelDist] = useState(25);
+  const [asymmetryAngle, setAsymmetryAngle] = useState(0);
 
   const onWebMessage = (event) => {
     if (!isAnalyzing) return;
@@ -217,6 +218,7 @@ export default function App() {
     } catch (e) {}
   };
 
+  // Calculations
   const rebaScore = (() => {
     if (!humanDetected) return '-';
     const keyA = `${trunk}-${neck}-${legs}`;
@@ -226,7 +228,109 @@ export default function App() {
     return TABLE_C[Math.min(scoreA - 1, 11)][Math.min(scoreB - 1, 11)];
   })();
 
+  const hmFactor = parseFloat((Math.min(1.0, 25 / Math.max(horizontalDist, 25))).toFixed(2));
+  const vmFactor = parseFloat((Math.max(0, 1 - 0.003 * Math.abs(verticalDist - 75))).toFixed(2));
+  const dmFactor = parseFloat((Math.min(1.0, 0.82 + 4.5 / Math.max(travelDist, 25))).toFixed(2));
+  const amFactor = parseFloat((Math.max(0, 1 - 0.0032 * asymmetryAngle)).toFixed(2));
+  const rwl = parseFloat((23 * hmFactor * vmFactor * dmFactor * amFactor).toFixed(2));
+  const liftingIndex = parseFloat((loadWeight / (rwl || 1)).toFixed(2));
+
   const activeMMHLimit = MMH_MATRIX[gender][2]['close'];
+
+  // PDF Export
+  const exportPDFReport = async () => {
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            @page { size: A4; margin: 12mm; }
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1c2833; margin: 0; padding: 0; font-size: 10px; }
+            .page { page-break-after: always; height: 96vh; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }
+            .header { border-bottom: 2px solid #1a5276; padding-bottom: 4px; margin-bottom: 10px; }
+            .header h1 { margin: 0; font-size: 16px; color: #1a5276; text-transform: uppercase; }
+            .header p { margin: 2px 0 0 0; color: #566573; font-size: 9px; }
+            .card-info { background-color: #ebf5fb; border-left: 4px solid #2980b9; padding: 8px; margin-bottom: 10px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+            th, td { border: 1px solid #d5dbdb; padding: 5px 6px; text-align: left; font-size: 9.5px; }
+            th { background-color: #2c3e50; color: #ffffff; text-transform: uppercase; font-size: 9px; }
+            .section-title { font-size: 11px; font-weight: bold; color: #2c3e50; margin: 8px 0 4px 0; border-bottom: 1px solid #ae2012; padding-bottom: 2px; }
+            .footer { font-size: 8.5px; text-align: center; color: #7f8c8d; border-top: 1px solid #d5dbdb; padding-top: 4px; }
+          </style>
+        </head>
+        <body>
+          <div class="page">
+            <div>
+              <div class="header">
+                <h1>REBA POSTURE AUDIT REPORT</h1>
+                <p>Operator ID: <strong>${operationName}</strong> | Object Identified: <strong>${detectedObject}</strong></p>
+              </div>
+              <div class="card-info">
+                <strong>REBA Overall Score: ${rebaScore}</strong>
+              </div>
+              <div class="section-title">Posture Analysis Summary</div>
+              <table>
+                <tr><th>BODY SEGMENT</th><th>CURRENT SCORE</th></tr>
+                <tr><td>Trunk</td><td>${trunk}</td></tr>
+                <tr><td>Neck</td><td>${neck}</td></tr>
+                <tr><td>Legs</td><td>${legs}</td></tr>
+                <tr><td>Upper Arm</td><td>${upperArm}</td></tr>
+                <tr><td>Lower Arm</td><td>${lowerArm}</td></tr>
+                <tr><td>Wrist</td><td>${wrist}</td></tr>
+              </table>
+            </div>
+            <div class="footer">Page 1 of 3 - REBA Assessment</div>
+          </div>
+
+          <div class="page">
+            <div>
+              <div class="header">
+                <h1>NIOSH LIFTING EVALUATION REPORT</h1>
+                <p>Operator ID: <strong>${operationName}</strong></p>
+              </div>
+              <div class="card-info">
+                <strong>Lifting Index (LI): ${liftingIndex}</strong> (RWL: ${rwl} kg)
+              </div>
+              <div class="section-title">Lifting Multipliers</div>
+              <table>
+                <tr><th>MULTIPLIER</th><th>VALUE</th></tr>
+                <tr><td>Horizontal (HM)</td><td>${hmFactor}</td></tr>
+                <tr><td>Vertical (VM)</td><td>${vmFactor}</td></tr>
+                <tr><td>Distance (DM)</td><td>${dmFactor}</td></tr>
+                <tr><td>Asymmetric (AM)</td><td>${amFactor}</td></tr>
+              </table>
+            </div>
+            <div class="footer">Page 2 of 3 - NIOSH Assessment</div>
+          </div>
+
+          <div class="page">
+            <div>
+              <div class="header">
+                <h1>MMH CAPACITY MATRIX REPORT</h1>
+                <p>Operator ID: <strong>${operationName}</strong> | Profile: <strong>${gender}</strong></p>
+              </div>
+              <div class="card-info">
+                <strong>Current Load: ${loadWeight} kg</strong> | Max Allowed Threshold: ${activeMMHLimit} kg
+              </div>
+              <div class="section-title">Manual Material Handling Limits</div>
+              <table>
+                <tr><th>ZONE</th><th>CLOSE REACH</th><th>FAR REACH</th></tr>
+                ${MMH_MATRIX[gender].map(r => `<tr><td>${r.zone}</td><td>${r.close} kg</td><td>${r.far} kg</td></tr>`).join('')}
+              </table>
+            </div>
+            <div class="footer">Page 3 of 3 - MMH Assessment</div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    try {
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to generate 3-page PDF report.');
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -242,6 +346,7 @@ export default function App() {
       </View>
 
       <View style={styles.dashboard}>
+        {/* Mode Selector */}
         <View style={styles.modeToggle}>
           {['REBA', 'NIOSH', 'MMH'].map((m) => (
             <TouchableOpacity key={m} style={[styles.toggleBtn, mode === m && styles.toggleActive]} onPress={() => setMode(m)}>
@@ -250,27 +355,111 @@ export default function App() {
           ))}
         </View>
 
+        {/* Live Status Header */}
         <View style={styles.objectCard}>
           <Text style={styles.scoreLabel}>HUMAN STATUS: <Text style={{ color: humanDetected ? '#00FF66' : '#FF3B30' }}>{humanDetected ? 'TRACKING LIVE' : 'NO HUMAN DETECTED'}</Text></Text>
           <Text style={[styles.objectValue, { color: detectedObject === 'No Object Detected' ? '#888' : '#00FF66' }]}>{detectedObject}</Text>
         </View>
 
+        {/* Dynamic Metric Display */}
         <View style={styles.scoreRow}>
           <View style={styles.scoreBox}><Text style={styles.scoreLabel}>REBA SCORE</Text><Text style={styles.scoreVal}>{rebaScore}</Text></View>
-          <View style={styles.scoreBox}><Text style={styles.scoreLabel}>LOAD WEIGHT</Text><Text style={styles.scoreVal}>{loadWeight} kg</Text></View>
+          <View style={styles.scoreBox}><Text style={styles.scoreLabel}>NIOSH LI</Text><Text style={styles.scoreVal}>{liftingIndex}</Text></View>
           <View style={styles.scoreBox}><Text style={styles.scoreLabel}>MMH LIMIT</Text><Text style={styles.scoreVal}>{activeMMHLimit} kg</Text></View>
         </View>
 
+        {/* Active Tab UI Controls */}
         <ScrollView style={styles.controlsScroll}>
           <View style={styles.inputCard}>
             <Text style={styles.inputLabel}>Operator ID:</Text>
             <TextInput style={styles.textInput} value={operationName} onChangeText={setOperationName} />
           </View>
+
+          {mode === 'REBA' && (
+            <View>
+              <Text style={styles.sectionHeader}>REBA Posture Overrides</Text>
+              <View style={styles.counterRow}>
+                <Text style={styles.inputLabel}>Trunk Score: {trunk}</Text>
+                <View style={styles.btnGroup}>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setTrunk(Math.max(1, trunk - 1))}><Text style={styles.btnTxt}>-</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setTrunk(Math.min(5, trunk + 1))}><Text style={styles.btnTxt}>+</Text></TouchableOpacity>
+                </View>
+              </View>
+              <View style={styles.counterRow}>
+                <Text style={styles.inputLabel}>Neck Score: {neck}</Text>
+                <View style={styles.btnGroup}>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setNeck(Math.max(1, neck - 1))}><Text style={styles.btnTxt}>-</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setNeck(Math.min(3, neck + 1))}><Text style={styles.btnTxt}>+</Text></TouchableOpacity>
+                </View>
+              </View>
+              <View style={styles.counterRow}>
+                <Text style={styles.inputLabel}>Upper Arm Score: {upperArm}</Text>
+                <View style={styles.btnGroup}>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setUpperArm(Math.max(1, upperArm - 1))}><Text style={styles.btnTxt}>-</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setUpperArm(Math.min(6, upperArm + 1))}><Text style={styles.btnTxt}>+</Text></TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {mode === 'NIOSH' && (
+            <View>
+              <Text style={styles.sectionHeader}>NIOSH Lifting Parameters</Text>
+              <View style={styles.counterRow}>
+                <Text style={styles.inputLabel}>Horizontal Dist (cm): {horizontalDist}</Text>
+                <View style={styles.btnGroup}>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setHorizontalDist(Math.max(25, horizontalDist - 5))}><Text style={styles.btnTxt}>-</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setHorizontalDist(horizontalDist + 5)}><Text style={styles.btnTxt}>+</Text></TouchableOpacity>
+                </View>
+              </View>
+              <View style={styles.counterRow}>
+                <Text style={styles.inputLabel}>Vertical Dist (cm): {verticalDist}</Text>
+                <View style={styles.btnGroup}>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setVerticalDist(Math.max(0, verticalDist - 5))}><Text style={styles.btnTxt}>-</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setVerticalDist(verticalDist + 5)}><Text style={styles.btnTxt}>+</Text></TouchableOpacity>
+                </View>
+              </View>
+              <View style={styles.counterRow}>
+                <Text style={styles.inputLabel}>Asymmetry (°): {asymmetryAngle}</Text>
+                <View style={styles.btnGroup}>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setAsymmetryAngle(Math.max(0, asymmetryAngle - 15))}><Text style={styles.btnTxt}>-</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setAsymmetryAngle(Math.min(135, asymmetryAngle + 15))}><Text style={styles.btnTxt}>+</Text></TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {mode === 'MMH' && (
+            <View>
+              <Text style={styles.sectionHeader}>MMH Profile Configuration</Text>
+              <View style={styles.genderRow}>
+                <TouchableOpacity style={[styles.genderBtn, gender === 'Male' && styles.genderActive]} onPress={() => setGender('Male')}>
+                  <Text style={styles.genderTxt}>Male</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.genderBtn, gender === 'Female' && styles.genderActive]} onPress={() => setGender('Female')}>
+                  <Text style={styles.genderTxt}>Female</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.counterRow}>
+                <Text style={styles.inputLabel}>Load Weight (kg): {loadWeight}</Text>
+                <View style={styles.btnGroup}>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setLoadWeight(Math.max(1, loadWeight - 1))}><Text style={styles.btnTxt}>-</Text></TouchableOpacity>
+                  <TouchableOpacity style={styles.stepBtn} onPress={() => setLoadWeight(loadWeight + 1)}><Text style={styles.btnTxt}>+</Text></TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
         </ScrollView>
 
-        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: isAnalyzing ? '#FF3B30' : '#00FF66' }]} onPress={() => setIsAnalyzing(!isAnalyzing)}>
-          <Text style={styles.btnText}>{isAnalyzing ? 'Stop Live Analysis' : 'Start Live Analysis'}</Text>
-        </TouchableOpacity>
+        {/* Global Action Buttons */}
+        <View style={styles.btnRow}>
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: isAnalyzing ? '#FF3B30' : '#00FF66' }]} onPress={() => setIsAnalyzing(!isAnalyzing)}>
+            <Text style={styles.btnText}>{isAnalyzing ? 'Stop Analysis' : 'Start Analysis'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FF9900' }]} onPress={exportPDFReport}>
+            <Text style={styles.btnText}>Export 3-Page PDF</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -291,10 +480,20 @@ const styles = StyleSheet.create({
   scoreBox: { backgroundColor: '#2A2A2A', flex: 1, marginHorizontal: 2, padding: 8, borderRadius: 8, alignItems: 'center' },
   scoreLabel: { color: '#888', fontSize: 9, fontWeight: 'bold' },
   scoreVal: { fontSize: 16, fontWeight: 'bold', color: '#FFF' },
-  controlsScroll: { flex: 1 },
+  controlsScroll: { flex: 1, marginBottom: 10 },
   inputCard: { backgroundColor: '#2A2A2A', padding: 10, borderRadius: 8, marginBottom: 8 },
   inputLabel: { color: '#FFF', fontSize: 12 },
   textInput: { backgroundColor: '#1E1E1E', color: '#FFF', borderRadius: 6, padding: 6, marginTop: 4 },
-  actionBtn: { paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  sectionHeader: { color: '#00FF66', fontWeight: 'bold', fontSize: 12, marginTop: 6, marginBottom: 6 },
+  counterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#2A2A2A', padding: 8, borderRadius: 6, marginBottom: 6 },
+  btnGroup: { flexDirection: 'row' },
+  stepBtn: { backgroundColor: '#3A3A3A', width: 28, height: 28, borderRadius: 4, justifyContent: 'center', alignItems: 'center', marginLeft: 6 },
+  btnTxt: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  genderRow: { flexDirection: 'row', marginBottom: 8 },
+  genderBtn: { flex: 1, backgroundColor: '#2A2A2A', paddingVertical: 8, alignItems: 'center', borderRadius: 6, marginHorizontal: 2 },
+  genderActive: { backgroundColor: '#00FF66' },
+  genderTxt: { color: '#FFF', fontWeight: 'bold' },
+  btnRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  actionBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginHorizontal: 4 },
   btnText: { color: '#121212', fontWeight: 'bold' }
 });
