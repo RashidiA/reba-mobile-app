@@ -1,33 +1,40 @@
 {
   "expo": {
-    "name": "REBA & Ergonomic Auditor",
-    "slug": "live-reba-mobile-app",
+    "name": "reba-mobile-app",
+    "slug": "reba-mobile-app",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#121212"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app requires camera access to perform live 3D pose analysis for ergonomic evaluations."
+      }
     },
     "android": {
-      "package": "com.rashidia.rebamobileapp",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#121212"
+      },
       "permissions": [
-        "CAMERA"
+        "CAMERA",
+        "RECORD_AUDIO"
       ]
     },
-    "extra": {
-      "eas": {
-        "projectId": "712edc2f-7ffe-4bd6-83bb-80b5e9112bdd"
-      }
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow this app to access your camera to perform real-time REBA posture assessments."
+          "cameraPermission": "Allow this app to access your camera to perform ergonomic evaluations."
         }
       ]
     ]
