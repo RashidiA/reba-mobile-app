@@ -37,6 +37,11 @@
           "cameraPermission": "Allow this app to access your camera to perform ergonomic evaluations."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "YOUR-EXPO-PROJECT-ID-HERE"
+      }
+    }
   }
 }
