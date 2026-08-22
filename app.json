@@ -26,9 +26,9 @@
     },
     "plugins": [
       [
-        "react-native-vision-camera",
+        "expo-camera",
         {
-          "cameraPermissionText": "This app needs camera access to perform real-time REBA posture assessment."
+          "cameraPermission": "Allow this app to access your camera to perform real-time REBA posture assessments."
         }
       ]
     ]
