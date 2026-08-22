@@ -14,19 +14,21 @@
       "supportsTablet": true
     },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#121212"
-      },
       "package": "com.rashidia.rebaapp",
       "permissions": [
         "CAMERA"
       ]
     },
+    "extra": {
+      "eas": {
+        "projectId": "712edc2f-7ffe-4bd6-83bb-80b5e9112bdd"
+      }
+    },
     "plugins": [
       [
         "react-native-vision-camera",
         {
-          "cameraPermissionText": "This app needs camera access to perform real-time REBA posture and ergonomic assessment."
+          "cameraPermissionText": "This app needs camera access to perform real-time REBA posture assessment."
         }
       ]
     ]
