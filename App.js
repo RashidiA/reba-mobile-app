@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, Dimensions } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, Dimensions, TextInput } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import Svg, { Line, Circle } from 'react-native-svg';
 import * as Sharing from 'expo-sharing';
@@ -42,8 +42,13 @@ const TABLE_C = [
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [mode, setMode] = useState('REBA');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // --- REBA Parameters ---
+  // Simplified Inputs
+  const [operationName, setOperationName] = useState('OP-001');
+  const [loadWeight, setLoadWeight] = useState(10);
+
+  // Live Joint Parameters
   const [trunk, setTrunk] = useState(1);
   const [neck, setNeck] = useState(1);
   const [legs, setLegs] = useState(1);
@@ -51,19 +56,25 @@ export default function App() {
   const [lowerArm, setLowerArm] = useState(1);
   const [wrist, setWrist] = useState(1);
 
-  // --- NIOSH Lifting Parameters ---
-  const [loadWeight, setLoadWeight] = useState(10);
+  // Dynamic Spatial Variables for NIOSH & MMH
   const [horizontalDist, setHorizontalDist] = useState(30);
   const [verticalDist, setVerticalDist] = useState(75);
   const [travelDist, setTravelDist] = useState(25);
   const [asymmetryAngle, setAsymmetryAngle] = useState(0);
 
-  // --- MMH Parameters ---
-  const [mmhTask, setMmhTask] = useState('Carry');
-  const [mmhWeight, setMmhWeight] = useState(15);
-  const [mmhDistance, setMmhDistance] = useState(10);
+  // Duration Statistics for Report
+  const [analysisDuration, setAnalysisDuration] = useState(0);
+  const [peakReba, setPeakReba] = useState(1);
+  const [durations, setDurations] = useState({
+    trunk: { low: 0, med: 0, high: 0 },
+    neck: { low: 0, med: 0, high: 0 },
+    upperArm: { low: 0, med: 0, high: 0 },
+    legs: { low: 0, med: 0, high: 0 },
+    wrists: { low: 0, med: 0, high: 0 },
+  });
 
   const [auditLogs, setAuditLogs] = useState([]);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     if (!permission) requestPermission();
@@ -89,9 +100,57 @@ export default function App() {
   const liftingIndex = parseFloat((loadWeight / (rwl || 1)).toFixed(2));
 
   const mmhLimit = (() => {
-    let base = mmhTask === 'Push' ? 20 : mmhTask === 'Pull' ? 18 : 14;
-    return parseFloat(Math.max(5, base - (mmhDistance > 10 ? (mmhDistance - 10) * 0.2 : 0)).toFixed(1));
+    let base = 14;
+    return parseFloat(Math.max(5, base - (travelDist > 10 ? (travelDist - 10) * 0.2 : 0)).toFixed(1));
   })();
+
+  // Dynamic Analysis Loop
+  useEffect(() => {
+    if (isAnalyzing) {
+      timerRef.current = setInterval(() => {
+        setAnalysisDuration((prev) => prev + 0.1);
+
+        const simTrunk = Math.floor(Math.random() * 3) + 1;
+        const simNeck = Math.floor(Math.random() * 2) + 1;
+        const simLegs = Math.floor(Math.random() * 2) + 1;
+        const simUpperArm = Math.floor(Math.random() * 4) + 1;
+        const simLowerArm = Math.floor(Math.random() * 2) + 1;
+        const simWrist = Math.floor(Math.random() * 2) + 1;
+
+        setTrunk(simTrunk);
+        setNeck(simNeck);
+        setLegs(simLegs);
+        setUpperArm(simUpperArm);
+        setLowerArm(simLowerArm);
+        setWrist(simWrist);
+
+        setHorizontalDist(25 + simUpperArm * 5);
+
+        const currentReba = rebaScore;
+        setPeakReba((prev) => Math.max(prev, currentReba));
+
+        setDurations((prev) => ({
+          trunk: { ...prev.trunk, [simTrunk <= 2 ? 'low' : simTrunk <= 4 ? 'med' : 'high']: prev.trunk[simTrunk <= 2 ? 'low' : simTrunk <= 4 ? 'med' : 'high'] + 0.1 },
+          neck: { ...prev.neck, [simNeck <= 2 ? 'low' : 'med']: prev.neck[simNeck <= 2 ? 'low' : 'med'] + 0.1 },
+          upperArm: { ...prev.upperArm, [simUpperArm <= 2 ? 'low' : simUpperArm <= 4 ? 'med' : 'high']: prev.upperArm[simUpperArm <= 2 ? 'low' : simUpperArm <= 4 ? 'med' : 'high'] + 0.1 },
+          legs: { ...prev.legs, [simLegs <= 2 ? 'low' : 'med']: prev.legs[simLegs <= 2 ? 'low' : 'med'] + 0.1 },
+          wrists: { ...prev.wrists, [simWrist <= 2 ? 'low' : 'med']: prev.wrists[simWrist <= 2 ? 'low' : 'med'] + 0.1 },
+        }));
+      }, 100);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isAnalyzing, rebaScore]);
+
+  const toggleAnalysis = () => {
+    if (!isAnalyzing) {
+      setIsAnalyzing(true);
+    } else {
+      setIsAnalyzing(false);
+      logAudit();
+    }
+  };
 
   const logAudit = () => {
     const entry = {
@@ -100,15 +159,18 @@ export default function App() {
       reba: rebaScore,
       rwl: rwl,
       li: liftingIndex,
-      mmhTask: mmhTask,
-      mmhWeight: mmhWeight,
+      mmhTask: 'Carry',
+      mmhWeight: loadWeight,
       mmhLimit: mmhLimit,
     };
-    setAuditLogs([entry, ...auditLogs]);
+    setAuditLogs((prev) => [entry, ...prev]);
   };
 
-  // HTML Multi-Page PDF Generator Matching Standard 3-Page Layout
+  const calcPct = (val, total) => (total > 0 ? ((val / total) * 100).toFixed(1) + '%' : '0.0%');
+
   const exportPDFReport = async () => {
+    const totalT = Math.max(analysisDuration, 1);
+
     const htmlContent = `
       <!DOCTYPE html>
       <html>
@@ -117,23 +179,17 @@ export default function App() {
             @page { size: A4; margin: 12mm; }
             body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1c2833; margin: 0; padding: 0; font-size: 10px; }
             .page { page-break-after: always; height: 96vh; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }
-            
             .header { border-bottom: 2px solid #1a5276; padding-bottom: 4px; margin-bottom: 10px; }
             .header h1 { margin: 0; font-size: 16px; color: #1a5276; text-transform: uppercase; }
             .header p { margin: 2px 0 0 0; color: #566573; font-size: 9px; }
-            
             .card-alert { background-color: #fceae8; border-left: 4px solid #c0392b; padding: 8px; margin-bottom: 10px; }
             .card-info { background-color: #ebf5fb; border-left: 4px solid #2980b9; padding: 8px; margin-bottom: 10px; }
-            
             table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
             th, td { border: 1px solid #d5dbdb; padding: 5px 6px; text-align: left; font-size: 9.5px; }
             th { background-color: #2c3e50; color: #ffffff; text-transform: uppercase; font-size: 9px; }
             .active-row { background-color: #f1948a; font-weight: bold; }
-            
             .section-title { font-size: 11px; font-weight: bold; color: #2c3e50; margin: 8px 0 4px 0; border-bottom: 1px solid #ae2012; padding-bottom: 2px; }
             .footer { font-size: 8.5px; text-align: center; color: #7f8c8d; border-top: 1px solid #d5dbdb; padding-top: 4px; }
-            
-            .diagram-box { text-align: center; margin: 8px 0; padding: 8px; background: #fafafa; border: 1px dashed #bdc3c7; }
           </style>
         </head>
         <body>
@@ -143,22 +199,22 @@ export default function App() {
             <div>
               <div class="header">
                 <h1>REBA POSTURE AUDIT REPORT</h1>
-                <p>Operator: OP-001 | Total Duration: 13.9 sec | Peak Evaluated REBA Score: <strong>${rebaScore}</strong></p>
+                <p>Operator: <strong>${operationName}</strong> | Total Duration: <strong>${analysisDuration.toFixed(1)} sec</strong> | Peak Evaluated REBA Score: <strong>${peakReba}</strong></p>
               </div>
 
               <div class="section-title">Full-Body Posture Duration Breakdown</div>
               <table>
-                <tr><th>Body Part</th><th>Score 1-2 (%)</th><th>Score 3-4 (%)</th><th>Score 5+ (%)</th></tr>
-                <tr><td>Trunk</td><td>73.0%</td><td>27.0%</td><td>0.0%</td></tr>
-                <tr><td>Neck</td><td>100.0%</td><td>0.0%</td><td>0.0%</td></tr>
-                <tr><td>Upper Arm</td><td>34.1%</td><td>65.9%</td><td>0.0%</td></tr>
-                <tr><td>Legs</td><td>100.0%</td><td>0.0%</td><td>0.0%</td></tr>
-                <tr><td>Wrists</td><td>100.0%</td><td>0.0%</td><td>0.0%</td></tr>
+                <tr><th>BODY PART</th><th>SCORE 1-2 (%)</th><th>SCORE 3-4 (%)</th><th>SCORE 5+ (%)</th></tr>
+                <tr><td>Trunk</td><td>${calcPct(durations.trunk.low, totalT)}</td><td>${calcPct(durations.trunk.med, totalT)}</td><td>${calcPct(durations.trunk.high, totalT)}</td></tr>
+                <tr><td>Neck</td><td>${calcPct(durations.neck.low, totalT)}</td><td>${calcPct(durations.neck.med, totalT)}</td><td>0.0%</td></tr>
+                <tr><td>Upper Arm</td><td>${calcPct(durations.upperArm.low, totalT)}</td><td>${calcPct(durations.upperArm.med, totalT)}</td><td>${calcPct(durations.upperArm.high, totalT)}</td></tr>
+                <tr><td>Legs</td><td>${calcPct(durations.legs.low, totalT)}</td><td>${calcPct(durations.legs.med, totalT)}</td><td>0.0%</td></tr>
+                <tr><td>Wrists</td><td>${calcPct(durations.wrists.low, totalT)}</td><td>${calcPct(durations.wrists.med, totalT)}</td><td>0.0%</td></tr>
               </table>
 
               <div class="section-title">REBA Standard Action & Risk Table</div>
               <table>
-                <tr><th>REBA Score</th><th>Risk Level</th><th>Action Required</th></tr>
+                <tr><th>REBA SCORE</th><th>RISK LEVEL</th><th>ACTION REQUIRED</th></tr>
                 <tr ${rebaScore === 1 ? 'class="active-row"' : ''}><td>1</td><td>None</td><td>Not necessary</td></tr>
                 <tr ${rebaScore >= 2 && rebaScore <= 3 ? 'class="active-row"' : ''}><td>2-3</td><td>Low</td><td>May be necessary</td></tr>
                 <tr ${rebaScore >= 4 && rebaScore <= 7 ? 'class="active-row"' : ''}><td>4-7</td><td>Medium</td><td>Necessary</td></tr>
@@ -168,7 +224,7 @@ export default function App() {
 
               <div class="section-title">Peak REBA Posture Snapshot & Step-by-Step Joint Angles</div>
               <table>
-                <tr><th>REBA Step / Joint</th><th>Score Value</th><th>Status</th></tr>
+                <tr><th>REBA STEP/JOINT</th><th>SCORE VALUE</th><th>STATUS</th></tr>
                 <tr><td>Step 1: Neck</td><td>+${neck}</td><td>Evaluated</td></tr>
                 <tr><td>Step 2: Trunk</td><td>+${trunk}</td><td>Evaluated</td></tr>
                 <tr><td>Step 3: Legs</td><td>+${legs}</td><td>Evaluated</td></tr>
@@ -185,19 +241,19 @@ export default function App() {
             <div>
               <div class="header">
                 <h1>MANUAL WEIGHT LIFTING AUDIT</h1>
-                <p>Operator: OP-001 | Evaluation Profile: Male</p>
+                <p>Operator: <strong>${operationName}</strong> | Evaluation Profile: Male</p>
               </div>
 
-              <div class="${mmhWeight > mmhLimit ? 'card-alert' : 'card-info'}">
-                <strong>SAFETY STATUS: ${mmhWeight > mmhLimit ? 'EXCEEDS SAFE ERGONOMIC LIMIT' : 'WITHIN SAFE ERGONOMIC LIMIT'}</strong><br/>
-                Task Type: <strong>${mmhTask}</strong> | Distance: <strong>${mmhDistance} m</strong><br/>
-                Actual Weight Lifted: <strong>${mmhWeight} kg</strong> | Max Recommended Limit: <strong>${mmhLimit} kg</strong>
+              <div class="${loadWeight > mmhLimit ? 'card-alert' : 'card-info'}">
+                <strong>SAFETY STATUS: ${loadWeight > mmhLimit ? 'EXCEEDS SAFE ERGONOMIC LIMIT' : 'WITHIN SAFE ERGONOMIC LIMIT'}</strong><br/>
+                Task Type: <strong>Carry</strong> | Distance: <strong>${travelDist} m</strong><br/>
+                Actual Weight Lifted: <strong>${loadWeight} kg</strong> | Max Recommended Limit: <strong>${mmhLimit} kg</strong>
               </div>
 
               <div class="section-title">Recommended Weight Matrix Reference (Male)</div>
               <table>
-                <tr><th>Height Zone</th><th>Close Reach Limit (kg)</th><th>Far Reach Limit (kg)</th></tr>
-                <tr class="active-row"><td>Above Shoulder</td><td>10.0 kg</td><td>5.0 kg</td></tr>
+                <tr><th>HEIGHT ZONE</th><th>CLOSE REACH LIMIT (KG)</th><th>FAR REACH LIMIT (KG)</th></tr>
+                <tr><td>Above Shoulder</td><td>10.0 kg</td><td>5.0 kg</td></tr>
                 <tr><td>Shoulder to Elbow</td><td>20.0 kg</td><td>10.0 kg</td></tr>
                 <tr><td>Elbow to Knuckle</td><td>25.0 kg</td><td>15.0 kg</td></tr>
                 <tr><td>Knuckle to Mid-Leg</td><td>20.0 kg</td><td>10.0 kg</td></tr>
@@ -205,49 +261,109 @@ export default function App() {
               </table>
 
               <div class="section-title">Ergonomic Lifting Reference Diagram</div>
-              <div class="diagram-box">
-                <svg width="340" height="160" viewBox="0 0 340 160">
-                  <text x="100" y="15" font-weight="bold" fill="#2c3e50" font-size="10">Female</text>
-                  <text x="240" y="15" font-weight="bold" fill="#2c3e50" font-size="10">Male</text>
-                  <line x1="10" y1="22" x2="330" y2="22" stroke="#bdc3c7" stroke-width="1"/>
+              
+              <!-- Embedded SVG Reference Diagram -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0; padding: 10px; background: #fafafa; border: 1px solid #d5dbdb; border-radius: 6px;">
+                <svg width="280" height="190" viewBox="0 0 280 190" style="font-family: sans-serif;">
+                  <text x="115" y="12" font-size="9" font-weight="bold" fill="#2c3e50">Female</text>
+                  <text x="175" y="12" font-size="9" font-weight="bold" fill="#2c3e50">Male</text>
 
-                  <text x="10" y="38" font-size="9" fill="#7f8c8d">Shoulder height</text>
-                  <text x="100" y="38" font-size="9" fill="#c0392b" font-weight="bold">3 kg / 7 kg</text>
-                  <text x="240" y="38" font-size="9" fill="#c0392b" font-weight="bold">10 kg / 5 kg</text>
+                  <line x1="80" y1="180" x2="215" y2="180" stroke="#2c3e50" stroke-width="2"/>
 
-                  <text x="10" y="66" font-size="9" fill="#7f8c8d">Elbow height</text>
-                  <text x="100" y="66" font-size="9">7 kg / 13 kg</text>
-                  <text x="240" y="66" font-size="9">20 kg / 10 kg</text>
+                  <text x="5" y="52" font-size="8" fill="#566573">Shoulder height</text>
+                  <line x1="75" y1="50" x2="220" y2="50" stroke="#bdc3c7" stroke-dasharray="2,2"/>
 
-                  <text x="10" y="94" font-size="9" fill="#7f8c8d">Knuckle height</text>
-                  <text x="100" y="94" font-size="9">10 kg / 16 kg</text>
-                  <text x="240" y="94" font-size="9">25 kg / 15 kg</text>
+                  <text x="5" y="82" font-size="8" fill="#566573">Elbow height</text>
+                  <line x1="75" y1="80" x2="220" y2="80" stroke="#bdc3c7" stroke-dasharray="2,2"/>
 
-                  <text x="10" y="122" font-size="9" fill="#7f8c8d">Mid lower leg height</text>
-                  <text x="100" y="122" font-size="9">7 kg / 13 kg</text>
-                  <text x="240" y="122" font-size="9">20 kg / 10 kg</text>
+                  <text x="5" y="112" font-size="8" fill="#566573">Knuckle height</text>
+                  <line x1="75" y1="110" x2="220" y2="110" stroke="#bdc3c7" stroke-dasharray="2,2"/>
 
-                  <text x="10" y="150" font-size="9" fill="#7f8c8d">Below mid lower leg</text>
-                  <text x="100" y="150" font-size="9">3 kg / 7 kg</text>
-                  <text x="240" y="150" font-size="9">10 kg / 5 kg</text>
+                  <text x="5" y="152" font-size="8" fill="#566573">Mid lower leg height</text>
+                  <line x1="75" y1="150" x2="220" y2="150" stroke="#bdc3c7" stroke-dasharray="2,2"/>
+
+                  <!-- Female Matrix -->
+                  <rect x="105" y="30" width="22" height="25" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="110" y="46" font-size="7.5" fill="#2c3e50">3 kg</text>
+                  <rect x="127" y="30" width="22" height="25" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="132" y="46" font-size="7.5" fill="#2c3e50">7 kg</text>
+
+                  <rect x="105" y="55" width="22" height="25" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="110" y="71" font-size="7.5" fill="#2c3e50">7 kg</text>
+                  <rect x="127" y="55" width="22" height="25" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="131" y="71" font-size="7.5" fill="#2c3e50">13 kg</text>
+
+                  <rect x="105" y="80" width="22" height="30" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="109" y="98" font-size="7.5" fill="#2c3e50">10 kg</text>
+                  <rect x="127" y="80" width="22" height="30" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="131" y="98" font-size="7.5" fill="#2c3e50">16 kg</text>
+
+                  <rect x="105" y="110" width="22" height="40" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="110" y="132" font-size="7.5" fill="#2c3e50">7 kg</text>
+                  <rect x="127" y="110" width="22" height="40" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="131" y="132" font-size="7.5" fill="#2c3e50">13 kg</text>
+
+                  <rect x="105" y="150" width="22" height="28" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="110" y="167" font-size="7.5" fill="#2c3e50">3 kg</text>
+                  <rect x="127" y="150" width="22" height="28" fill="#fef9e7" stroke="#d5dbdb"/>
+                  <text x="132" y="167" font-size="7.5" fill="#2c3e50">7 kg</text>
+
+                  <!-- Male Matrix -->
+                  <rect x="165" y="30" width="22" height="25" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="168" y="46" font-size="7.5" font-weight="bold" fill="#1a5276">10 kg</text>
+                  <rect x="187" y="30" width="22" height="25" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="192" y="46" font-size="7.5" font-weight="bold" fill="#1a5276">5 kg</text>
+
+                  <rect x="165" y="55" width="22" height="25" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="168" y="71" font-size="7.5" font-weight="bold" fill="#1a5276">20 kg</text>
+                  <rect x="187" y="55" width="22" height="25" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="190" y="71" font-size="7.5" font-weight="bold" fill="#1a5276">10 kg</text>
+
+                  <rect x="165" y="80" width="22" height="30" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="168" y="98" font-size="7.5" font-weight="bold" fill="#1a5276">25 kg</text>
+                  <rect x="187" y="80" width="22" height="30" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="190" y="98" font-size="7.5" font-weight="bold" fill="#1a5276">15 kg</text>
+
+                  <rect x="165" y="110" width="22" height="40" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="168" y="132" font-size="7.5" font-weight="bold" fill="#1a5276">20 kg</text>
+                  <rect x="187" y="110" width="22" height="40" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="190" y="132" font-size="7.5" font-weight="bold" fill="#1a5276">10 kg</text>
+
+                  <rect x="165" y="150" width="22" height="28" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="168" y="167" font-size="7.5" font-weight="bold" fill="#1a5276">10 kg</text>
+                  <rect x="187" y="150" width="22" height="28" fill="#eaf2f8" stroke="#d5dbdb"/>
+                  <text x="192" y="167" font-size="7.5" font-weight="bold" fill="#1a5276">5 kg</text>
+
+                  <!-- Mannequin Vector -->
+                  <circle cx="150" cy="35" r="7" fill="#d35400"/>
+                  <line x1="150" y1="42" x2="150" y2="105" stroke="#d35400" stroke-width="6"/>
+                  <line x1="150" y1="52" x2="200" y2="52" stroke="#d35400" stroke-width="4"/>
+                  <circle cx="200" cy="52" r="3" fill="#2980b9"/>
+                  <line x1="150" y1="105" x2="142" y2="180" stroke="#d35400" stroke-width="5"/>
+                  <line x1="150" y1="105" x2="158" y2="180" stroke="#d35400" stroke-width="5"/>
+                  <circle cx="150" cy="52" r="3.5" fill="#a04000"/>
+                  <circle cx="150" cy="105" r="4" fill="#a04000"/>
                 </svg>
+
+                <div style="width: 45%; padding-left: 10px;">
+                  <div class="section-title" style="margin-top: 0;">Ergonomic Recommendations:</div>
+                  <ol style="margin-top: 5px; padding-left: 15px; font-size: 9px; line-height: 1.4; color: #2c3e50;">
+                    <li>Maintain load close to body to optimize reach leverage.</li>
+                    <li>Avoid lifting above shoulder height without mechanical support.</li>
+                  </ol>
+                </div>
               </div>
 
-              <div class="section-title">Ergonomic Recommendations</div>
-              <ol style="margin-top:2px; padding-left:15px;">
-                <li>Maintain load close to body to optimize reach leverage.</li>
-                <li>Avoid lifting above shoulder height without mechanical support.</li>
-              </ol>
             </div>
             <div class="footer">Page 2 of 3 - Recommended Weight Limits Matrix Standard</div>
           </div>
 
-          <!-- PAGE 3: NIOSH LIFTING EQUATION ASSESSMENT & LOGS -->
+          <!-- PAGE 3: NIOSH ASSESSMENT & LOGS -->
           <div class="page">
             <div>
               <div class="header">
                 <h1>NIOSH LIFTING EQUATION ASSESSMENT</h1>
-                <p>Operator: OP-001 | Peak Dynamic Spatial Evaluation</p>
+                <p>Operator: <strong>${operationName}</strong> | Peak Dynamic Spatial Evaluation</p>
               </div>
 
               <div class="section-title">1. Object & Load Condition</div>
@@ -255,7 +371,7 @@ export default function App() {
 
               <div class="section-title">2. Live NIOSH Multipliers & Spatial Geometry</div>
               <table>
-                <tr><th>Parameter / Multiplier</th><th>Measured Value</th><th>Factor</th><th>Formula / Standard</th></tr>
+                <tr><th>PARAMETER/MULTIPLIER</th><th>MEASURED VALUE</th><th>FACTOR</th><th>FORMULA/STANDARD</th></tr>
                 <tr><td>Load Constant (LC)</td><td>23.0 kg</td><td>1.00</td><td>Baseline Load</td></tr>
                 <tr><td>Horizontal Multiplier (HM)</td><td>${horizontalDist} cm</td><td>${hmFactor}</td><td>25 / H</td></tr>
                 <tr><td>Vertical Multiplier (VM)</td><td>${verticalDist} cm</td><td>${vmFactor}</td><td>1 - 0.003 |V - 75|</td></tr>
@@ -272,12 +388,7 @@ export default function App() {
 
               <div class="section-title">Captured Real-Time Audit Logs (${auditLogs.length} Entries)</div>
               <table>
-                <tr>
-                  <th>Time</th>
-                  <th>REBA</th>
-                  <th>NIOSH LI</th>
-                  <th>MMH Limit</th>
-                </tr>
+                <tr><th>TIME</th><th>REBA</th><th>NIOSH LI</th><th>MMH LIMIT</th></tr>
                 ${auditLogs.length > 0 ? auditLogs.map(l => `
                   <tr>
                     <td>${l.timestamp}</td>
@@ -316,17 +427,14 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      {/* Live Camera View */}
       <CameraView style={styles.camera} facing="back">
         <Svg height={height * 0.35} width={width} style={styles.overlay}>
-          <Line x1={width * 0.5} y1="40" x2={width * 0.5} y2="180" stroke="#00FF66" strokeWidth="4" />
-          <Circle cx={width * 0.5} cy="30" r="12" stroke="#00FF66" strokeWidth="3" fill="transparent" />
+          <Line x1={width * 0.5} y1="40" x2={width * 0.5} y2="180" stroke={isAnalyzing ? "#FF0000" : "#00FF66"} strokeWidth="4" />
+          <Circle cx={width * 0.5} cy="30" r="12" stroke={isAnalyzing ? "#FF0000" : "#00FF66"} strokeWidth="3" fill="transparent" />
         </Svg>
       </CameraView>
 
-      {/* Control Dashboard */}
       <View style={styles.dashboard}>
-        {/* Toggle Mode */}
         <View style={styles.modeToggle}>
           <TouchableOpacity style={[styles.toggleBtn, mode === 'REBA' && styles.toggleActive]} onPress={() => setMode('REBA')}>
             <Text style={styles.toggleText}>REBA</Text>
@@ -339,7 +447,6 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* Dynamic Display Panel */}
         <View style={styles.scoreRow}>
           <View style={styles.scoreBox}>
             <Text style={styles.scoreLabel}>REBA SCORE</Text>
@@ -355,37 +462,30 @@ export default function App() {
           </View>
         </View>
 
-        {/* Dynamic Adjustment Panel */}
         <ScrollView style={styles.controlsScroll}>
-          {mode === 'REBA' && (
-            <View style={styles.adjRow}>
-              <Text style={styles.adjLabel}>Trunk Angle Score ({trunk}):</Text>
-              <TouchableOpacity onPress={() => setTrunk(Math.max(1, trunk - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setTrunk(Math.min(5, trunk + 1))} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
-            </View>
-          )}
+          <View style={styles.inputCard}>
+            <Text style={styles.inputLabel}>Operation Name / ID:</Text>
+            <TextInput style={styles.textInput} value={operationName} onChangeText={setOperationName} placeholder="e.g. OP-001" placeholderTextColor="#888" />
+          </View>
 
-          {mode === 'NIOSH' && (
+          <View style={styles.inputCard}>
             <View style={styles.adjRow}>
-              <Text style={styles.adjLabel}>Load Weight ({loadWeight} kg):</Text>
-              <TouchableOpacity onPress={() => setLoadWeight(Math.max(1, loadWeight - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setLoadWeight(loadWeight + 1)} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
+              <Text style={styles.inputLabel}>Load Weight ({loadWeight} kg):</Text>
+              <View style={{ flexDirection: 'row' }}>
+                <TouchableOpacity onPress={() => setLoadWeight(Math.max(1, loadWeight - 1))} style={styles.adjBtn}>
+                  <Text style={styles.adjText}>-</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setLoadWeight(loadWeight + 1)} style={[styles.adjBtn, { marginLeft: 8 }]}>
+                  <Text style={styles.adjText}>+</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          )}
-
-          {mode === 'MMH' && (
-            <View style={styles.adjRow}>
-              <Text style={styles.adjLabel}>Handled Weight ({mmhWeight} kg):</Text>
-              <TouchableOpacity onPress={() => setMmhWeight(Math.max(1, mmhWeight - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setMmhWeight(mmhWeight + 1)} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
-            </View>
-          )}
+          </View>
         </ScrollView>
 
-        {/* Action Controls */}
         <View style={styles.btnRow}>
-          <TouchableOpacity style={styles.actionBtn} onPress={logAudit}>
-            <Text style={styles.btnText}>Log Entry</Text>
+          <TouchableOpacity style={[styles.actionBtn, isAnalyzing ? { backgroundColor: '#FF3B30' } : { backgroundColor: '#00FF66' }]} onPress={toggleAnalysis}>
+            <Text style={styles.btnText}>{isAnalyzing ? 'Stop Analysis' : 'Start Analysis'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FF9900' }]} onPress={exportPDFReport}>
             <Text style={styles.btnText}>Export 3-Page PDF</Text>
@@ -414,11 +514,13 @@ const styles = StyleSheet.create({
   scoreLabel: { color: '#888', fontSize: 9, fontWeight: 'bold' },
   scoreVal: { fontSize: 16, fontWeight: 'bold', color: '#FFF', marginTop: 4 },
   controlsScroll: { flex: 1, marginBottom: 10 },
-  adjRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, backgroundColor: '#2A2A2A', padding: 8, borderRadius: 6 },
-  adjLabel: { color: '#FFF', fontSize: 12 },
+  inputCard: { backgroundColor: '#2A2A2A', padding: 10, borderRadius: 8, marginBottom: 8 },
+  inputLabel: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  textInput: { backgroundColor: '#1E1E1E', color: '#FFF', borderRadius: 6, padding: 8, marginTop: 4, fontSize: 13 },
+  adjRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   adjBtn: { backgroundColor: '#3A3A3A', width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
   adjText: { color: '#00FF66', fontSize: 18, fontWeight: 'bold' },
   btnRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  actionBtn: { flex: 1, backgroundColor: '#00FF66', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginHorizontal: 4 },
+  actionBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginHorizontal: 4 },
   btnText: { color: '#121212', fontWeight: 'bold' }
 });
