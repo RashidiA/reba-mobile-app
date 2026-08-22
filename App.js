@@ -4,6 +4,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import Svg, { Line, Circle } from 'react-native-svg';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
 
 const { width, height } = Dimensions.get('window');
 
@@ -41,7 +42,7 @@ const TABLE_C = [
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
-  const [mode, setMode] = useState('REBA'); // 'REBA', 'NIOSH', or 'MMH'
+  const [mode, setMode] = useState('REBA');
 
   // --- REBA Parameters ---
   const [trunk, setTrunk] = useState(1);
@@ -52,17 +53,16 @@ export default function App() {
   const [wrist, setWrist] = useState(1);
 
   // --- NIOSH Lifting Parameters ---
-  const [loadWeight, setLoadWeight] = useState(10); // kg
-  const [horizontalDist, setHorizontalDist] = useState(30); // cm
-  const [verticalDist, setVerticalDist] = useState(75); // cm
-  const [travelDist, setTravelDist] = useState(25); // cm
-  const [asymmetryAngle, setAsymmetryAngle] = useState(0); // deg
+  const [loadWeight, setLoadWeight] = useState(10);
+  const [horizontalDist, setHorizontalDist] = useState(30);
+  const [verticalDist, setVerticalDist] = useState(75);
+  const [travelDist, setTravelDist] = useState(25);
+  const [asymmetryAngle, setAsymmetryAngle] = useState(0);
 
-  // --- MMH (Snook Tables / Push-Pull-Carry) Parameters ---
-  const [mmhTask, setMmhTask] = useState('Carry'); // Carry, Push, Pull
-  const [mmhWeight, setMmhWeight] = useState(15); // kg
-  const [mmhDistance, setMmhDistance] = useState(10); // meters
-  const [mmhFrequency, setMmhFrequency] = useState(1); // lifts/min
+  // --- MMH Parameters ---
+  const [mmhTask, setMmhTask] = useState('Carry');
+  const [mmhWeight, setMmhWeight] = useState(15);
+  const [mmhDistance, setMmhDistance] = useState(10);
 
   const [auditLogs, setAuditLogs] = useState([]);
 
@@ -70,8 +70,8 @@ export default function App() {
     if (!permission) requestPermission();
   }, [permission]);
 
-  // REBA Engine
-  const computeReba = () => {
+  // Calculations
+  const rebaScore = (() => {
     const keyA = `${trunk}-${neck}-${legs}`;
     const scoreA = TABLE_A[keyA] || 1;
     const keyB = `${upperArm}-${lowerArm}-${wrist}`;
@@ -79,85 +79,145 @@ export default function App() {
     const rowIdx = Math.min(Math.max(scoreA - 1, 0), 11);
     const colIdx = Math.min(Math.max(scoreB - 1, 0), 11);
     return TABLE_C[rowIdx][colIdx];
-  };
+  })();
 
-  // NIOSH Engine
-  const computeNioshRWL = () => {
+  const rwl = (() => {
     const LC = 23;
     const HM = Math.min(1.0, 25 / Math.max(horizontalDist, 25));
     const VM = 1 - 0.003 * Math.abs(verticalDist - 75);
     const DM = 0.82 + 4.5 / Math.max(travelDist, 25);
     const AM = 1 - 0.0032 * asymmetryAngle;
+    return parseFloat((LC * HM * Math.max(0, VM) * Math.min(1.0, DM) * Math.max(0, AM)).toFixed(2));
+  })();
 
-    const rwl = LC * HM * Math.max(0, VM) * Math.min(1.0, DM) * Math.max(0, AM);
-    return parseFloat(rwl.toFixed(2));
-  };
-
-  // MMH Engine (Snook Limit Approximation based on Task & Distance)
-  const computeMmhLimit = () => {
-    let baseLimit = 14; // Standard carry base threshold (kg)
-    if (mmhTask === 'Push') baseLimit = 20;
-    if (mmhTask === 'Pull') baseLimit = 18;
-
-    const freqPenalty = mmhFrequency * 0.8;
-    const distPenalty = mmhDistance > 10 ? (mmhDistance - 10) * 0.2 : 0;
-    
-    const maxRecommended = Math.max(5, baseLimit - freqPenalty - distPenalty);
-    return parseFloat(maxRecommended.toFixed(1));
-  };
-
-  const rebaScore = computeReba();
-  const rwl = computeNioshRWL();
   const liftingIndex = parseFloat((loadWeight / (rwl || 1)).toFixed(2));
-  const mmhLimit = computeMmhLimit();
-  const mmhExceeded = mmhWeight > mmhLimit;
+
+  const mmhLimit = (() => {
+    let base = mmhTask === 'Push' ? 20 : mmhTask === 'Pull' ? 18 : 14;
+    return parseFloat(Math.max(5, base - (mmhDistance > 10 ? (mmhDistance - 10) * 0.2 : 0)).toFixed(1));
+  })();
 
   const logAudit = () => {
     const entry = {
       id: Date.now(),
       timestamp: new Date().toLocaleTimeString(),
-      mode: mode,
       reba: rebaScore,
       rwl: rwl,
       li: liftingIndex,
       mmhTask: mmhTask,
       mmhWeight: mmhWeight,
       mmhLimit: mmhLimit,
-      status: mode === 'REBA' 
-        ? (rebaScore > 7 ? 'High Risk' : 'Acceptable') 
-        : mode === 'NIOSH' 
-        ? (liftingIndex > 1.0 ? 'High Risk' : 'Safe Lift')
-        : (mmhExceeded ? 'Exceeds Snook Limit' : 'Acceptable Load')
     };
     setAuditLogs([entry, ...auditLogs]);
   };
 
-  const exportCSV = async () => {
-    if (auditLogs.length === 0) {
-      Alert.alert('No Data', 'Add audit entries before exporting.');
-      return;
-    }
+  // HTML Multi-Page PDF Generator
+  const exportPDFReport = async () => {
+    const htmlContent = `
+      <html>
+        <head>
+          <style>
+            body { font-family: Helvetica, Arial, sans-serif; padding: 20px; color: #333; }
+            .page { page-break-after: always; height: 95vh; display: flex; flex-direction: column; justify-content: space-between; }
+            h1 { color: #1E1E1E; border-bottom: 2px solid #00FF66; padding-bottom: 10px; }
+            h2 { color: #2A2A2A; margin-top: 20px; }
+            .card { background-color: #F4F4F4; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #DDD; padding: 8px; text-align: left; }
+            th { background-color: #2A2A2A; color: white; }
+            .footer { font-size: 10px; text-align: center; color: #888; border-top: 1px solid #CCC; padding-top: 5px; }
+          </style>
+        </head>
+        <body>
+          <!-- PAGE 1: REBA Posture Assessment -->
+          <div class="page">
+            <div>
+              <h1>Ergonomic Audit Report: Page 1 / 3</h1>
+              <h2>REBA Postural Evaluation</h2>
+              <div class="card">
+                <p><strong>Calculated REBA Score:</strong> ${rebaScore}</p>
+                <p><strong>Action Level:</strong> ${rebaScore > 7 ? 'High Risk - Corrective Action Required' : 'Low/Medium Risk'}</p>
+              </div>
+              <h3>Posture Parameters</h3>
+              <ul>
+                <li>Trunk Score: ${trunk}</li>
+                <li>Neck Score: ${neck}</li>
+                <li>Legs Score: ${legs}</li>
+                <li>Upper Arm: ${upperArm} | Lower Arm: ${lowerArm} | Wrist: ${wrist}</li>
+              </ul>
+            </div>
+            <div class="footer">REBA Assessment Section - Generated Mobile Ergonomic Report</div>
+          </div>
 
-    let csv = 'Timestamp,Method,REBA Score,NIOSH RWL (kg),NIOSH LI,MMH Task,MMH Weight (kg),MMH Limit (kg),Status\n';
-    auditLogs.forEach((l) => {
-      csv += `${l.timestamp},${l.mode},${l.reba},${l.rwl},${l.li},${l.mmhTask || 'N/A'},${l.mmhWeight || 'N/A'},${l.mmhLimit || 'N/A'},${l.status}\n`;
-    });
+          <!-- PAGE 2: NIOSH Lifting Assessment -->
+          <div class="page">
+            <div>
+              <h1>Ergonomic Audit Report: Page 2 / 3</h1>
+              <h2>NIOSH Lifting Equation Analysis</h2>
+              <div class="card">
+                <p><strong>Recommended Weight Limit (RWL):</strong> ${rwl} kg</p>
+                <p><strong>Lifting Index (LI):</strong> ${liftingIndex}</p>
+                <p><strong>Evaluation:</strong> ${liftingIndex > 1.0 ? 'Exceeds Recommended Safe Limit' : 'Acceptable Lift Criteria'}</p>
+              </div>
+              <h3>Input Variables</h3>
+              <ul>
+                <li>Actual Load Weight: ${loadWeight} kg</li>
+                <li>Horizontal Distance: ${horizontalDist} cm</li>
+                <li>Vertical Distance: ${verticalDist} cm</li>
+                <li>Travel Distance: ${travelDist} cm</li>
+              </ul>
+            </div>
+            <div class="footer">NIOSH Section - Generated Mobile Ergonomic Report</div>
+          </div>
 
-    const fileUri = `${FileSystem.documentDirectory}ergonomic_audit_${Date.now()}.csv`;
+          <!-- PAGE 3: MMH Snook Assessment & Summary Logs -->
+          <div class="page">
+            <div>
+              <h1>Ergonomic Audit Report: Page 3 / 3</h1>
+              <h2>Manual Materials Handling (MMH) & Audit Log Summary</h2>
+              <div class="card">
+                <p><strong>Task Type:</strong> ${mmhTask}</p>
+                <p><strong>Handled Load Weight:</strong> ${mmhWeight} kg</p>
+                <p><strong>Maximum Recommended Limit:</strong> ${mmhLimit} kg</p>
+              </div>
+              <h3>Captured Real-Time Logs (${auditLogs.length} Entries)</h3>
+              <table>
+                <tr>
+                  <th>Time</th>
+                  <th>REBA</th>
+                  <th>NIOSH LI</th>
+                  <th>MMH Limit</th>
+                </tr>
+                ${auditLogs.map(l => `
+                  <tr>
+                    <td>${l.timestamp}</td>
+                    <td>${l.reba}</td>
+                    <td>${l.li}</td>
+                    <td>${l.mmhLimit} kg</td>
+                  </tr>
+                `).join('')}
+              </table>
+            </div>
+            <div class="footer">MMH Summary Section - Generated Mobile Ergonomic Report</div>
+          </div>
+        </body>
+      </html>
+    `;
+
     try {
-      await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
-      await Sharing.shareAsync(fileUri);
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri);
     } catch (err) {
-      Alert.alert('Error', 'Failed to export CSV file.');
+      Alert.alert('Error', 'Failed to generate PDF report.');
     }
   };
 
   if (!permission || !permission.granted) {
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.messageText}>Camera permission required for ergonomic audits.</Text>
+        <Text style={styles.messageText}>Camera access required.</Text>
         <TouchableOpacity style={styles.button} onPress={requestPermission}>
-          <Text style={styles.buttonText}>Grant Access</Text>
+          <Text style={styles.buttonText}>Grant Permission</Text>
         </TouchableOpacity>
       </View>
     );
@@ -167,7 +227,7 @@ export default function App() {
     <View style={styles.container}>
       {/* Live Camera View */}
       <CameraView style={styles.camera} facing="back">
-        <Svg height={height * 0.38} width={width} style={styles.overlay}>
+        <Svg height={height * 0.35} width={width} style={styles.overlay}>
           <Line x1={width * 0.5} y1="40" x2={width * 0.5} y2="180" stroke="#00FF66" strokeWidth="4" />
           <Circle cx={width * 0.5} cy="30" r="12" stroke="#00FF66" strokeWidth="3" fill="transparent" />
         </Svg>
@@ -175,118 +235,59 @@ export default function App() {
 
       {/* Control Dashboard */}
       <View style={styles.dashboard}>
-        {/* Toggle Mode Bar */}
+        {/* Toggle Mode */}
         <View style={styles.modeToggle}>
-          <TouchableOpacity 
-            style={[styles.toggleBtn, mode === 'REBA' && styles.toggleActive]} 
-            onPress={() => setMode('REBA')}>
+          <TouchableOpacity style={[styles.toggleBtn, mode === 'REBA' && styles.toggleActive]} onPress={() => setMode('REBA')}>
             <Text style={styles.toggleText}>REBA</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.toggleBtn, mode === 'NIOSH' && styles.toggleActive]} 
-            onPress={() => setMode('NIOSH')}>
+          <TouchableOpacity style={[styles.toggleBtn, mode === 'NIOSH' && styles.toggleActive]} onPress={() => setMode('NIOSH')}>
             <Text style={styles.toggleText}>NIOSH</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.toggleBtn, mode === 'MMH' && styles.toggleActive]} 
-            onPress={() => setMode('MMH')}>
+          <TouchableOpacity style={[styles.toggleBtn, mode === 'MMH' && styles.toggleActive]} onPress={() => setMode('MMH')}>
             <Text style={styles.toggleText}>MMH</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Dynamic Score Panel */}
-        {mode === 'REBA' && (
-          <View style={styles.scoreRow}>
-            <View style={styles.scoreBox}>
-              <Text style={styles.scoreLabel}>REBA SCORE</Text>
-              <Text style={[styles.scoreVal, { color: rebaScore > 7 ? '#FF3300' : '#00FF66' }]}>{rebaScore}</Text>
-            </View>
-            <View style={styles.scoreBox}>
-              <Text style={styles.scoreLabel}>ACTION LEVEL</Text>
-              <Text style={styles.scoreVal}>{rebaScore > 7 ? 'High Risk' : 'Low Risk'}</Text>
-            </View>
+        {/* Dynamic Display Panel */}
+        <View style={styles.scoreRow}>
+          <View style={styles.scoreBox}>
+            <Text style={styles.scoreLabel}>REBA SCORE</Text>
+            <Text style={styles.scoreVal}>{rebaScore}</Text>
           </View>
-        )}
-
-        {mode === 'NIOSH' && (
-          <View style={styles.scoreRow}>
-            <View style={styles.scoreBox}>
-              <Text style={styles.scoreLabel}>RWL (KG)</Text>
-              <Text style={styles.scoreVal}>{rwl}</Text>
-            </View>
-            <View style={styles.scoreBox}>
-              <Text style={styles.scoreLabel}>LIFTING INDEX (LI)</Text>
-              <Text style={[styles.scoreVal, { color: liftingIndex > 1.0 ? '#FF3300' : '#00FF66' }]}>{liftingIndex}</Text>
-            </View>
+          <View style={styles.scoreBox}>
+            <Text style={styles.scoreLabel}>NIOSH LI</Text>
+            <Text style={styles.scoreVal}>{liftingIndex}</Text>
           </View>
-        )}
-
-        {mode === 'MMH' && (
-          <View style={styles.scoreRow}>
-            <View style={styles.scoreBox}>
-              <Text style={styles.scoreLabel}>MAX LIMIT (KG)</Text>
-              <Text style={styles.scoreVal}>{mmhLimit}</Text>
-            </View>
-            <View style={styles.scoreBox}>
-              <Text style={styles.scoreLabel}>SNOOK ASSESSMENT</Text>
-              <Text style={[styles.scoreVal, { color: mmhExceeded ? '#FF3300' : '#00FF66' }]}>
-                {mmhExceeded ? 'Exceeded' : 'Safe Load'}
-              </Text>
-            </View>
+          <View style={styles.scoreBox}>
+            <Text style={styles.scoreLabel}>MMH LIMIT</Text>
+            <Text style={styles.scoreVal}>{mmhLimit} kg</Text>
           </View>
-        )}
+        </View>
 
-        {/* Dynamic Interactive Controls */}
+        {/* Dynamic Adjustment Panel */}
         <ScrollView style={styles.controlsScroll}>
           {mode === 'REBA' && (
-            <>
-              <View style={styles.adjRow}>
-                <Text style={styles.adjLabel}>Trunk Position ({trunk}):</Text>
-                <TouchableOpacity onPress={() => setTrunk(Math.max(1, trunk - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => setTrunk(Math.min(5, trunk + 1))} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
-              </View>
-              <View style={styles.adjRow}>
-                <Text style={styles.adjLabel}>Neck Position ({neck}):</Text>
-                <TouchableOpacity onPress={() => setNeck(Math.max(1, neck - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => setNeck(Math.min(2, neck + 1))} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
-              </View>
-            </>
+            <View style={styles.adjRow}>
+              <Text style={styles.adjLabel}>Trunk Angle Score ({trunk}):</Text>
+              <TouchableOpacity onPress={() => setTrunk(Math.max(1, trunk - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setTrunk(Math.min(5, trunk + 1))} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
+            </View>
           )}
 
           {mode === 'NIOSH' && (
-            <>
-              <View style={styles.adjRow}>
-                <Text style={styles.adjLabel}>Load Weight ({loadWeight} kg):</Text>
-                <TouchableOpacity onPress={() => setLoadWeight(Math.max(1, loadWeight - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => setLoadWeight(loadWeight + 1)} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
-              </View>
-              <View style={styles.adjRow}>
-                <Text style={styles.adjLabel}>Horizontal Dist ({horizontalDist} cm):</Text>
-                <TouchableOpacity onPress={() => setHorizontalDist(Math.max(25, horizontalDist - 5))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => setHorizontalDist(horizontalDist + 5)} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
-              </View>
-            </>
+            <View style={styles.adjRow}>
+              <Text style={styles.adjLabel}>Load Weight ({loadWeight} kg):</Text>
+              <TouchableOpacity onPress={() => setLoadWeight(Math.max(1, loadWeight - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setLoadWeight(loadWeight + 1)} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
+            </View>
           )}
 
           {mode === 'MMH' && (
-            <>
-              <View style={styles.adjRow}>
-                <Text style={styles.adjLabel}>Task Type ({mmhTask}):</Text>
-                <TouchableOpacity onPress={() => setMmhTask(mmhTask === 'Carry' ? 'Push' : mmhTask === 'Push' ? 'Pull' : 'Carry')} style={[styles.adjBtn, { width: 60 }]}>
-                  <Text style={[styles.adjText, { fontSize: 12 }]}>Switch</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.adjRow}>
-                <Text style={styles.adjLabel}>Handled Weight ({mmhWeight} kg):</Text>
-                <TouchableOpacity onPress={() => setMmhWeight(Math.max(1, mmhWeight - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => setMmhWeight(mmhWeight + 1)} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
-              </View>
-              <View style={styles.adjRow}>
-                <Text style={styles.adjLabel}>Carry/Move Dist ({mmhDistance} m):</Text>
-                <TouchableOpacity onPress={() => setMmhDistance(Math.max(1, mmhDistance - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => setMmhDistance(mmhDistance + 1)} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
-              </View>
-            </>
+            <View style={styles.adjRow}>
+              <Text style={styles.adjLabel}>Handled Weight ({mmhWeight} kg):</Text>
+              <TouchableOpacity onPress={() => setMmhWeight(Math.max(1, mmhWeight - 1))} style={styles.adjBtn}><Text style={styles.adjText}>-</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setMmhWeight(mmhWeight + 1)} style={styles.adjBtn}><Text style={styles.adjText}>+</Text></TouchableOpacity>
+            </View>
           )}
         </ScrollView>
 
@@ -295,8 +296,8 @@ export default function App() {
           <TouchableOpacity style={styles.actionBtn} onPress={logAudit}>
             <Text style={styles.btnText}>Log Entry</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#29B6F6' }]} onPress={exportCSV}>
-            <Text style={styles.btnText}>Export CSV</Text>
+          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#FF9900' }]} onPress={exportPDFReport}>
+            <Text style={styles.btnText}>Export 3-Page PDF</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -310,7 +311,7 @@ const styles = StyleSheet.create({
   messageText: { color: '#FFF', fontSize: 16, textAlign: 'center', marginBottom: 20 },
   button: { backgroundColor: '#00FF66', padding: 12, borderRadius: 8 },
   buttonText: { color: '#121212', fontWeight: 'bold' },
-  camera: { height: height * 0.38, width: '100%' },
+  camera: { height: height * 0.35, width: '100%' },
   overlay: { position: 'absolute', top: 0, left: 0 },
   dashboard: { flex: 1, backgroundColor: '#1E1E1E', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
   modeToggle: { flexDirection: 'row', backgroundColor: '#2A2A2A', borderRadius: 8, marginBottom: 12 },
@@ -318,9 +319,9 @@ const styles = StyleSheet.create({
   toggleActive: { backgroundColor: '#00FF66' },
   toggleText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   scoreRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  scoreBox: { backgroundColor: '#2A2A2A', flex: 1, marginHorizontal: 4, padding: 10, borderRadius: 8, alignItems: 'center' },
-  scoreLabel: { color: '#888', fontSize: 10, fontWeight: 'bold' },
-  scoreVal: { fontSize: 18, fontWeight: 'bold', color: '#FFF', marginTop: 4 },
+  scoreBox: { backgroundColor: '#2A2A2A', flex: 1, marginHorizontal: 3, padding: 8, borderRadius: 8, alignItems: 'center' },
+  scoreLabel: { color: '#888', fontSize: 9, fontWeight: 'bold' },
+  scoreVal: { fontSize: 16, fontWeight: 'bold', color: '#FFF', marginTop: 4 },
   controlsScroll: { flex: 1, marginBottom: 10 },
   adjRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, backgroundColor: '#2A2A2A', padding: 8, borderRadius: 6 },
   adjLabel: { color: '#FFF', fontSize: 12 },
