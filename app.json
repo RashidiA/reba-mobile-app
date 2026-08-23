@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "reba-mobile-app",
-    "slug": "reba-mobile-app",
+    "slug": "live-reba-mobile-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
