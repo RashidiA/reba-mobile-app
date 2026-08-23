@@ -13,11 +13,13 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.rashidiasari.rebamobileapp",
       "infoPlist": {
         "NSCameraUsageDescription": "This app requires camera access to perform live 3D pose analysis for ergonomic evaluations."
       }
     },
     "android": {
+      "package": "com.rashidiasari.rebamobileapp",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#121212"
