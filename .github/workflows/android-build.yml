@@ -24,17 +24,13 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install dependencies
         run: npm install
 
-      - name: Install Expo CLI globally
-        run: npm install -g expo-cli
-
       - name: Generate Native Android Directory
         run: npx expo prebuild --platform android --clean
+        env:
+          CI: 1
 
       - name: Build Android APK
         run: |
