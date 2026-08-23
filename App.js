@@ -4,7 +4,7 @@ import { WebView } from 'react-native-webview';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 
-// --- 1. FULL REBA LOOKUP TABLES ---
+// --- LOOKUP TABLES ---
 const TABLE_A = {
   '1-1-1': 1, '1-1-2': 2, '1-2-1': 2, '1-2-2': 3,
   '2-1-1': 2, '2-1-2': 3, '2-2-1': 3, '2-2-2': 4,
@@ -17,7 +17,7 @@ const TABLE_B = {
   '1-1-1': 1, '1-1-2': 2, '1-2-1': 2, '1-2-2': 3,
   '2-1-1': 1, '2-1-2': 2, '2-2-1': 3, '2-2-2': 4,
   '3-1-1': 3, '3-1-2': 4, '3-2-1': 4, '3-2-2': 5,
-  '4-1-1': 4, '4-1-2': 5, '4-2-1': 5, '4-2-2': 6,
+  '4-1-1': 3, '4-1-2': 4, '4-2-1': 5, '4-2-2': 6,
   '5-1-1': 7, '5-1-2': 8, '5-2-1': 8, '5-2-2': 9,
 };
 
@@ -36,7 +36,6 @@ const TABLE_C = [
   [10, 10, 10, 11, 11, 12, 12, 12, 12, 12, 12, 12]
 ];
 
-// --- 2. FULL MMH CAPACITY MATRIX ---
 const MMH_MATRIX = {
   Male: [
     { zone: 'Above Shoulder (>140cm)', close: 10, far: 5 },
@@ -54,7 +53,6 @@ const MMH_MATRIX = {
   ]
 };
 
-// --- 3. VISION ENGINE HTML (MEDIA STREAM FIX INCLUDED) ---
 const cameraVisionHTML = `
 <!DOCTYPE html>
 <html>
@@ -129,12 +127,6 @@ const cameraVisionHTML = `
         ctx.lineTo(lm[j].x * w, lm[j].y * h);
         ctx.stroke();
       });
-      lm.forEach(pt => {
-        ctx.beginPath();
-        ctx.arc(pt.x * w, pt.y * h, 4, 0, 2 * Math.PI);
-        ctx.fillStyle = '#FF3B30';
-        ctx.fill();
-      });
     }
 
     async function startCamera() {
@@ -149,7 +141,7 @@ const cameraVisionHTML = `
           camera.start();
         }
       } catch(e) {
-        console.error("Camera Error: ", e);
+        console.error("Camera error: ", e);
       }
     }
 
@@ -163,13 +155,13 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [humanDetected, setHumanDetected] = useState(false);
 
-  // Simplified Inputs
+  // User Inputs
   const [operatorName, setOperatorName] = useState('OP-101');
   const [processName, setProcessName] = useState('Spot Welding');
   const [gender, setGender] = useState('Male');
   const [weight, setWeight] = useState('12');
 
-  // Dynamic Posture Joints (Pose Detection)
+  // Dynamic Joint Scores
   const [trunk, setTrunk] = useState(1);
   const [neck, setNeck] = useState(1);
   const [legs, setLegs] = useState(1);
@@ -177,7 +169,6 @@ export default function App() {
   const [lowerArm, setLowerArm] = useState(1);
   const [wrist, setWrist] = useState(1);
 
-  // Request Android Camera Permissions
   const requestCameraPermission = async () => {
     if (Platform.OS === 'android') {
       try {
@@ -217,7 +208,7 @@ export default function App() {
     } catch (e) {}
   };
 
-  // --- REBA CALCULATION ---
+  // REBA Calculation
   const rebaScore = (() => {
     if (!humanDetected) return '-';
     const keyA = `${trunk}-${neck}-${legs}`;
@@ -227,7 +218,7 @@ export default function App() {
     return TABLE_C[Math.min(scoreA - 1, 11)][Math.min(scoreB - 1, 11)];
   })();
 
-  // --- NIOSH CALCULATION ---
+  // NIOSH Calculation
   const loadNum = parseFloat(weight) || 0;
   const hm = 0.83; 
   const vm = 0.90; 
@@ -236,10 +227,10 @@ export default function App() {
   const rwl = parseFloat((23 * hm * vm * dm * am).toFixed(2));
   const liftingIndex = parseFloat((loadNum / (rwl || 1)).toFixed(2));
 
-  // --- MMH CALCULATION ---
+  // MMH Calculation
   const activeMMHLimit = MMH_MATRIX[gender][2]['close'];
 
-  // --- 3-PAGE PDF REPORT EXPORT ---
+  // 3-Page PDF Export
   const exportPDFReport = async () => {
     const htmlContent = `
       <!DOCTYPE html>
@@ -247,16 +238,14 @@ export default function App() {
         <head>
           <style>
             @page { size: A4; margin: 12mm; }
-            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1c2833; margin: 0; padding: 0; font-size: 10px; }
-            .page { page-break-after: always; height: 96vh; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; font-size: 10px; color: #1c2833; }
+            .page { page-break-after: always; height: 95vh; display: flex; flex-direction: column; justify-content: space-between; }
             .header { border-bottom: 2px solid #1a5276; padding-bottom: 4px; margin-bottom: 10px; }
-            .header h1 { margin: 0; font-size: 16px; color: #1a5276; text-transform: uppercase; }
-            .header p { margin: 2px 0 0 0; color: #566573; font-size: 9px; }
+            .header h1 { margin: 0; font-size: 16px; color: #1a5276; }
             .card-info { background-color: #ebf5fb; border-left: 4px solid #2980b9; padding: 8px; margin-bottom: 10px; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-            th, td { border: 1px solid #d5dbdb; padding: 5px 6px; text-align: left; font-size: 9.5px; }
-            th { background-color: #2c3e50; color: #ffffff; text-transform: uppercase; font-size: 9px; }
-            .section-title { font-size: 11px; font-weight: bold; color: #2c3e50; margin: 8px 0 4px 0; border-bottom: 1px solid #ae2012; padding-bottom: 2px; }
+            th, td { border: 1px solid #d5dbdb; padding: 5px; text-align: left; }
+            th { background-color: #2c3e50; color: #ffffff; }
             .footer { font-size: 8.5px; text-align: center; color: #7f8c8d; border-top: 1px solid #d5dbdb; padding-top: 4px; }
           </style>
         </head>
@@ -268,11 +257,10 @@ export default function App() {
                 <p>Operator: <strong>${operatorName}</strong> | Process: <strong>${processName}</strong></p>
               </div>
               <div class="card-info">
-                <strong>REBA Overall Calculated Score: ${rebaScore}</strong>
+                <strong>REBA Calculated Score: ${rebaScore}</strong>
               </div>
-              <div class="section-title">Posture Analysis Breakdown</div>
               <table>
-                <tr><th>BODY SEGMENT</th><th>CURRENT SCORE</th></tr>
+                <tr><th>BODY SEGMENT</th><th>SCORE</th></tr>
                 <tr><td>Trunk</td><td>${trunk}</td></tr>
                 <tr><td>Neck</td><td>${neck}</td></tr>
                 <tr><td>Legs</td><td>${legs}</td></tr>
@@ -291,9 +279,8 @@ export default function App() {
                 <p>Operator: <strong>${operatorName}</strong> | Process: <strong>${processName}</strong></p>
               </div>
               <div class="card-info">
-                <strong>Lifting Index (LI): ${liftingIndex}</strong> (Recommended Weight Limit: ${rwl} kg | Actual Load: ${loadNum} kg)
+                <strong>Lifting Index (LI): ${liftingIndex}</strong> (RWL: ${rwl} kg | Load: ${loadNum} kg)
               </div>
-              <div class="section-title">Standard Multipliers</div>
               <table>
                 <tr><th>MULTIPLIER</th><th>VALUE</th></tr>
                 <tr><td>Horizontal (HM)</td><td>${hm}</td></tr>
@@ -312,9 +299,8 @@ export default function App() {
                 <p>Operator: <strong>${operatorName}</strong> | Profile: <strong>${gender}</strong></p>
               </div>
               <div class="card-info">
-                <strong>Current Load: ${loadNum} kg</strong> | Max Allowed Zone Threshold: ${activeMMHLimit} kg
+                <strong>Load: ${loadNum} kg</strong> | Allowed Threshold: ${activeMMHLimit} kg
               </div>
-              <div class="section-title">Manual Material Handling Threshold Matrix</div>
               <table>
                 <tr><th>ZONE</th><th>CLOSE REACH</th><th>FAR REACH</th></tr>
                 ${MMH_MATRIX[gender].map(r => `<tr><td>${r.zone}</td><td>${r.close} kg</td><td>${r.far} kg</td></tr>`).join('')}
@@ -348,7 +334,7 @@ export default function App() {
           domStorageEnabled={true}
           androidCameraPermissionOptions={{
             title: 'Permission to use camera',
-            message: 'We need your permission to use your camera',
+            message: 'We need permission to use your camera for pose analysis.',
             buttonPositive: 'Ok',
             buttonNegative: 'Cancel',
           }}
@@ -356,14 +342,12 @@ export default function App() {
       </View>
 
       <View style={styles.dashboard}>
-        {/* Dynamic Multi-Tool Indicators */}
         <View style={styles.scoreRow}>
           <View style={styles.scoreBox}><Text style={styles.scoreLabel}>REBA SCORE</Text><Text style={styles.scoreVal}>{rebaScore}</Text></View>
           <View style={styles.scoreBox}><Text style={styles.scoreLabel}>NIOSH LI</Text><Text style={styles.scoreVal}>{liftingIndex}</Text></View>
           <View style={styles.scoreBox}><Text style={styles.scoreLabel}>MMH LIMIT</Text><Text style={styles.scoreVal}>{activeMMHLimit} kg</Text></View>
         </View>
 
-        {/* Simplified User Inputs */}
         <ScrollView style={styles.formContainer}>
           <Text style={styles.sectionHeader}>Evaluation Parameters</Text>
           
@@ -395,7 +379,6 @@ export default function App() {
           </View>
         </ScrollView>
 
-        {/* Action Controls */}
         <View style={styles.btnRow}>
           <TouchableOpacity style={[styles.actionBtn, { backgroundColor: isAnalyzing ? '#FF3B30' : '#00FF66' }]} onPress={handleToggleAnalysis}>
             <Text style={styles.btnText}>{isAnalyzing ? 'Stop Analysis' : 'Start Analysis'}</Text>
