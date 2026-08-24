@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 
@@ -71,8 +72,8 @@ const cameraVisionHTML = `
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <style>
-    body { margin: 0; padding: 0; background: #000; overflow: hidden; }
-    #video { width: 100vw; height: 35vh; object-fit: cover; }
+    body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+    #video { width: 100vw; height: 35vh; object-fit: cover; opacity: 0; position: absolute; }
     #canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 35vh; }
   </style>
 </head>
@@ -164,6 +165,7 @@ const cameraVisionHTML = `
 export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [humanDetected, setHumanDetected] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
 
   // User Inputs
   const [operatorName, setOperatorName] = useState('OP-101');
@@ -191,7 +193,8 @@ export default function App() {
         return false;
       }
     }
-    return true;
+    const res = await requestPermission();
+    return res.granted;
   };
 
   const handleToggleAnalysis = async () => {
@@ -333,6 +336,9 @@ export default function App() {
   return (
     <View style={styles.container}>
       <View style={styles.cameraBox}>
+        {isAnalyzing && (
+          <CameraView style={StyleSheet.absoluteFillObject} facing="back" />
+        )}
         <WebView
           originWhitelist={['*']}
           source={{ html: cameraVisionHTML }}
@@ -412,8 +418,8 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212' },
-  cameraBox: { height: '35%', width: '100%' },
-  webView: { flex: 1 },
+  cameraBox: { height: '35%', width: '100%', backgroundColor: '#000', position: 'relative' },
+  webView: { flex: 1, backgroundColor: 'transparent' },
   dashboard: { flex: 1, backgroundColor: '#1E1E1E', padding: 14, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
   scoreRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   scoreBox: { backgroundColor: '#2A2A2A', flex: 1, marginHorizontal: 2, padding: 8, borderRadius: 8, alignItems: 'center' },
