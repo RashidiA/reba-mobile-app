@@ -16,7 +16,20 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "com.rashidiasari.rebamobileapp"
-    }
+      "package": "com.rashidiasari.rebamobileapp",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow this app to access your camera to run REBA, MMH, and NIOSH ergonomic assessments."
+        }
+      ]
+    ]
   }
 }
