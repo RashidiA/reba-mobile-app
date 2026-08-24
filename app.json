@@ -4,13 +4,7 @@
     "slug": "reba-mobile-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#121212"
-    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -18,10 +12,7 @@
       }
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#121212"
-      },
+      "backgroundColor": "#121212",
       "permissions": [
         "CAMERA"
       ],
@@ -34,9 +25,6 @@
           "cameraPermission": "Allow this app to access your camera for posture assessment."
         }
       ]
-    ],
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    ]
   }
 }
