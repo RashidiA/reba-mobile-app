@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, TextInput, PermissionsAndroid, Platform } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  TextInput,
+  PermissionsAndroid,
+  Platform,
+} from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
@@ -332,11 +342,19 @@ export default function App() {
           mediaPlaybackRequiresUserAction={false}
           javaScriptEnabled={true}
           domStorageEnabled={true}
+          allowFileAccess={true}
+          allowUniversalAccessFromFileURLs={true}
+          mixedContentMode="always"
+          androidHardwareAccelerationDisabled={false}
           androidCameraPermissionOptions={{
             title: 'Permission to use camera',
             message: 'We need permission to use your camera for pose analysis.',
             buttonPositive: 'Ok',
             buttonNegative: 'Cancel',
+          }}
+          onError={(syntheticEvent) => {
+            const { nativeEvent } = syntheticEvent;
+            console.warn('WebView error: ', nativeEvent);
           }}
         />
       </View>
