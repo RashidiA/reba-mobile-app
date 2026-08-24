@@ -354,7 +354,7 @@ export default function App() {
           androidHardwareAccelerationDisabled={false}
           androidCameraPermissionOptions={{
             title: 'Permission to use camera',
-            message: 'We need permission to use your camera for pose analysis.',
+            message: 'We need permission to use your camera for posture analysis.',
             buttonPositive: 'Ok',
             buttonNegative: 'Cancel',
           }}
