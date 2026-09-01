@@ -11,7 +11,6 @@ import {
   Platform,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 
@@ -64,29 +63,44 @@ const MMH_MATRIX = {
   ]
 };
 
-const cameraVisionHTML = `
+const getCameraHTML = (isAnalyzing) => `
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <style>
-    body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
-    #video { width: 100vw; height: 35vh; object-fit: cover; opacity: 0; position: absolute; }
-    #canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 35vh; }
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #container { position: relative; width: 100vw; height: 100vh; }
+    #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+    #status { position: absolute; top: 10px; left: 10px; color: #00FF66; font-family: sans-serif; font-size: 12px; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; z-index: 10; }
   </style>
 </head>
 <body>
-  <video id="video" playsinline webkit-playsinline muted autoplay></video>
-  <canvas id="canvas"></canvas>
+  <div id="container">
+    <div id="status">${isAnalyzing ? 'Initializing AI...' : 'Analysis Paused'}</div>
+    <video id="video" playsinline webkit-playsinline muted></video>
+    <canvas id="canvas"></canvas>
+  </div>
 
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
+    const status = document.getElementById('status');
+    const isAnalyzing = ${isAnalyzing};
+
+    function sendToRN(msg) {
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+      }
+    }
 
     function getAngle(a, b, c) {
+      if (!a || !b || !c) return 0;
       const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
       let angle = Math.abs((radians * 180.0) / Math.PI);
       return angle > 180.0 ? 360 - angle : angle;
@@ -105,54 +119,86 @@ const cameraVisionHTML = `
 
     pose.onResults((results) => {
       canvas.width = video.videoWidth || window.innerWidth;
-      canvas.height = video.videoHeight || (window.innerHeight * 0.35);
+      canvas.height = video.videoHeight || window.innerHeight;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (!results.poseLandmarks) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ humanDetected: false }));
+      if (!results.poseLandmarks || !isAnalyzing) {
+        status.innerText = isAnalyzing ? "Searching for human..." : "Analysis Paused";
+        sendToRN({ humanDetected: false });
         return;
       }
 
+      status.innerText = "Tracking Pose Active";
       const lm = results.poseLandmarks;
       drawSkeleton(lm, ctx, canvas.width, canvas.height);
 
+      // Angle calculations
       const trunkAngle = Math.round(getAngle(lm[11], lm[23], lm[25]));
       const neckAngle = Math.round(getAngle(lm[0], lm[11], lm[23]));
       const armAngle = Math.round(getAngle(lm[11], lm[13], lm[15]));
+      const elbowAngle = Math.round(getAngle(lm[13], lm[15], lm[17]));
+      const legAngle = Math.round(getAngle(lm[23], lm[25], lm[27]));
 
-      window.ReactNativeWebView.postMessage(JSON.stringify({
+      sendToRN({
         humanDetected: true,
-        trunk: Math.min(Math.max(Math.floor(trunkAngle / 20), 1), 5),
-        neck: Math.min(Math.max(Math.floor(neckAngle / 15), 1), 3),
-        upperArm: Math.min(Math.max(Math.floor(armAngle / 30), 1), 6)
-      }));
+        trunk: Math.min(Math.max(Math.ceil(trunkAngle / 15), 1), 5),
+        neck: Math.min(Math.max(Math.ceil(neckAngle / 10), 1), 3),
+        legs: legAngle > 130 ? 1 : 2,
+        upperArm: Math.min(Math.max(Math.ceil(armAngle / 20), 1), 6),
+        lowerArm: (elbowAngle >= 60 && elbowAngle <= 100) ? 1 : 2,
+        wrist: 1
+      });
     });
 
     function drawSkeleton(lm, ctx, w, h) {
-      const connections = [[11,12], [11,13], [13,15], [12,14], [14,16], [11,23], [12,24], [23,24], [23,25], [24,26]];
+      const connections = [
+        [11,12], [11,13], [13,15], [12,14], [14,16], 
+        [11,23], [12,24], [23,24], [23,25], [24,26], [25,27], [26,28]
+      ];
+
+      // Draw lines
       ctx.strokeStyle = '#00FF66';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 4;
       connections.forEach(([i, j]) => {
+        if (lm[i] && lm[j]) {
+          ctx.beginPath();
+          ctx.moveTo(lm[i].x * w, lm[i].y * h);
+          ctx.lineTo(lm[j].x * w, lm[j].y * h);
+          ctx.stroke();
+        }
+      });
+
+      // Draw points
+      ctx.fillStyle = '#FF0055';
+      lm.forEach((pt) => {
         ctx.beginPath();
-        ctx.moveTo(lm[i].x * w, lm[i].y * h);
-        ctx.lineTo(lm[j].x * w, lm[j].y * h);
-        ctx.stroke();
+        ctx.arc(pt.x * w, pt.y * h, 4, 0, 2 * Math.PI);
+        ctx.fill();
       });
     }
 
     async function startCamera() {
       try {
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+          });
           video.srcObject = stream;
+          await video.play();
+
           const camera = new Camera(video, {
-            onFrame: async () => { await pose.send({ image: video }); },
-            width: 640, height: 480
+            onFrame: async () => {
+              if (isAnalyzing) {
+                await pose.send({ image: video });
+              }
+            },
+            width: 640,
+            height: 480
           });
           camera.start();
         }
       } catch(e) {
-        console.error("Camera error: ", e);
+        status.innerText = "Camera error: " + e.message;
       }
     }
 
@@ -165,7 +211,6 @@ const cameraVisionHTML = `
 export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [humanDetected, setHumanDetected] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
 
   // User Inputs
   const [operatorName, setOperatorName] = useState('OP-101');
@@ -193,8 +238,7 @@ export default function App() {
         return false;
       }
     }
-    const res = await requestPermission();
-    return res.granted;
+    return true;
   };
 
   const handleToggleAnalysis = async () => {
@@ -209,21 +253,23 @@ export default function App() {
   };
 
   const onWebMessage = (event) => {
-    if (!isAnalyzing) return;
     try {
       const data = JSON.parse(event.nativeEvent.data);
       setHumanDetected(data.humanDetected);
-      if (data.humanDetected) {
+      if (data.humanDetected && isAnalyzing) {
         setTrunk(data.trunk || 1);
         setNeck(data.neck || 1);
+        setLegs(data.legs || 1);
         setUpperArm(data.upperArm || 1);
+        setLowerArm(data.lowerArm || 1);
+        setWrist(data.wrist || 1);
       }
     } catch (e) {}
   };
 
   // REBA Calculation
   const rebaScore = (() => {
-    if (!humanDetected) return '-';
+    if (!humanDetected || !isAnalyzing) return '-';
     const keyA = `${trunk}-${neck}-${legs}`;
     const scoreA = TABLE_A[keyA] || 1;
     const keyB = `${upperArm}-${lowerArm}-${wrist}`;
@@ -233,17 +279,17 @@ export default function App() {
 
   // NIOSH Calculation
   const loadNum = parseFloat(weight) || 0;
-  const hm = 0.83; 
-  const vm = 0.90; 
-  const dm = 0.93; 
-  const am = 1.00; 
+  const hm = 0.83;
+  const vm = 0.90;
+  const dm = 0.93;
+  const am = 1.00;
   const rwl = parseFloat((23 * hm * vm * dm * am).toFixed(2));
   const liftingIndex = parseFloat((loadNum / (rwl || 1)).toFixed(2));
 
   // MMH Calculation
   const activeMMHLimit = MMH_MATRIX[gender][2]['close'];
 
-  // 3-Page PDF Export
+  // PDF Export
   const exportPDFReport = async () => {
     const htmlContent = `
       <!DOCTYPE html>
@@ -336,12 +382,9 @@ export default function App() {
   return (
     <View style={styles.container}>
       <View style={styles.cameraBox}>
-        {isAnalyzing && (
-          <CameraView style={StyleSheet.absoluteFillObject} facing="back" />
-        )}
         <WebView
           originWhitelist={['*']}
-          source={{ html: cameraVisionHTML }}
+          source={{ html: getCameraHTML(isAnalyzing) }}
           style={styles.webView}
           onMessage={onWebMessage}
           allowsInlineMediaPlayback={true}
@@ -352,15 +395,8 @@ export default function App() {
           allowUniversalAccessFromFileURLs={true}
           mixedContentMode="always"
           androidHardwareAccelerationDisabled={false}
-          androidCameraPermissionOptions={{
-            title: 'Permission to use camera',
-            message: 'We need permission to use your camera for posture analysis.',
-            buttonPositive: 'Ok',
-            buttonNegative: 'Cancel',
-          }}
-          onError={(syntheticEvent) => {
-            const { nativeEvent } = syntheticEvent;
-            console.warn('WebView error: ', nativeEvent);
+          onPermissionRequest={(request) => {
+            request.grant(request.resources);
           }}
         />
       </View>
@@ -418,7 +454,7 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212' },
-  cameraBox: { height: '35%', width: '100%', backgroundColor: '#000', position: 'relative' },
+  cameraBox: { height: '35%', width: '100%', backgroundColor: '#000' },
   webView: { flex: 1, backgroundColor: 'transparent' },
   dashboard: { flex: 1, backgroundColor: '#1E1E1E', padding: 14, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
   scoreRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
